@@ -443,13 +443,34 @@ def bypass_cloudflare_interstitial(sb, max_attempts=3) -> bool:
             except Exception as e:
                 logger.warning(f"uc_gui_click_captcha 失败: {e}，直接等待自动验证")
 
-            for _ in range(60):
+            for waited in range(60):
                 if not is_cloudflare_interstitial(sb):
                     logger.info("✅ Turnstile 挑战已通过")
                     return True
+                # 点击可能未命中（代理延迟、窗口位置等），定时补点几次
+                if waited and waited % 15 == 0:
+                    logger.info("  Turnstile 仍未通过，重新点击…")
+                    try:
+                        sb.uc_gui_click_captcha()
+                    except Exception as e:
+                        logger.warning(f"  重新点击失败: {e}")
                 time.sleep(1)
 
             logger.warning(f"等待超时，尝试下一轮")
+            try:
+                state = sb.execute_script('''
+                    (function() {
+                        var inp = document.querySelector('input[name="cf-turnstile-response"]');
+                        return {
+                            title: document.title,
+                            widget: !!document.querySelector('iframe[src*="challenges.cloudflare"]'),
+                            token_len: inp ? inp.value.length : -1
+                        };
+                    })();
+                ''')
+                logger.warning(f"Turnstile 状态: {state}")
+            except Exception as e:
+                logger.warning(f"读取 Turnstile 状态失败: {e}")
 
         except Exception as e:
             logger.warning(f"Turnstile 绕过尝试 {attempt+1} 出错: {e}")
@@ -463,6 +484,19 @@ def bypass_cloudflare_interstitial(sb, max_attempts=3) -> bool:
         if not is_cloudflare_interstitial(sb):
             logger.info("✅ 刷新后 Turnstile 已通过")
             return True
+
+        # 刷新后的页面同样需要点击，再给一轮等待
+        try:
+            sb.uc_gui_click_captcha()
+            logger.info("已调用 uc_gui_click_captcha（刷新后）")
+        except Exception as e:
+            logger.warning(f"刷新后点击失败: {e}")
+
+        for _ in range(30):
+            if not is_cloudflare_interstitial(sb):
+                logger.info("✅ 刷新后 Turnstile 已通过")
+                return True
+            time.sleep(1)
     except Exception as e:
         logger.error(f"刷新重试失败: {e}")
 
@@ -1149,13 +1183,11 @@ def main():
         sys.exit(1)
 
     is_proxy = os.environ.get("IS_PROXY", "false").lower() == "true"
-    proxy = os.environ.get("PROXY_SERVER", "").strip() if is_proxy else None
-    if is_proxy and not proxy:
-        proxy = "http://127.0.0.1:1080"
-    if proxy:
-        scheme = proxy.split("://", 1)[0] if "://" in proxy else "http"
-        logger.info(f"🔗 使用代理（{scheme}）")
+    proxy = os.environ.get("PROXY_SERVER", "").strip() or "http://127.0.0.1:1080"
+    if is_proxy:
+        logger.info(f"🔗 使用代理 {proxy}")
     else:
+        proxy = None
         logger.info("🍭 未使用代理，直连访问")
 
     egress_ip = ""
