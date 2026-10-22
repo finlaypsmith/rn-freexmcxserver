@@ -67,6 +67,42 @@ def get_current_ip(proxy_server: Optional[str] = None) -> str:
     response.raise_for_status()
     return response.text.strip()
 
+def setup_timezone(ip: str, proxy_server: Optional[str] = None) -> Optional[str]:
+    """按出口 IP 设置浏览器时区（Cloudflare 会把 UTC 时区视为自动化环境）"""
+    from zoneinfo import ZoneInfo
+
+    proxies = {"http": proxy_server, "https": proxy_server} if proxy_server else None
+    timezone_name = None
+    try:
+        response = requests.get(f"https://ipinfo.io/{ip}/timezone", proxies=proxies, timeout=15)
+        response.raise_for_status()
+        timezone_name = response.text.strip()
+    except Exception as e:
+        logger.warning(f"查询出口 IP 时区失败: {e}")
+
+    if not timezone_name:
+        try:
+            response = requests.get(
+                f"http://ip-api.com/json/{ip}?fields=status,timezone",
+                proxies=proxies, timeout=15
+            )
+            data = response.json()
+            if data.get("status") == "success":
+                timezone_name = data.get("timezone")
+        except Exception as e:
+            logger.warning(f"备用时区查询失败: {e}")
+
+    try:
+        ZoneInfo(timezone_name)
+    except Exception:
+        logger.warning(f"未获取到有效的出口时区（{timezone_name}），保持系统默认")
+        return None
+
+    # 只影响后续启动的 Chrome 子进程；不调用 tzset，日志时间保持系统时区
+    os.environ["TZ"] = timezone_name
+    logger.info(f"🕒 已按出口 IP 设置浏览器时区: {timezone_name}")
+    return timezone_name
+
 def setup_display():
     if is_linux() and not os.environ.get("DISPLAY"):
         try:
@@ -458,17 +494,12 @@ def bypass_cloudflare_interstitial(sb, max_attempts=3) -> bool:
 
             logger.warning(f"等待超时，尝试下一轮")
             try:
-                state = sb.execute_script('''
-                    (function() {
-                        var inp = document.querySelector('input[name="cf-turnstile-response"]');
-                        return {
-                            title: document.title,
-                            widget: !!document.querySelector('iframe[src*="challenges.cloudflare"]'),
-                            token_len: inp ? inp.value.length : -1
-                        };
-                    })();
-                ''')
-                logger.warning(f"Turnstile 状态: {state}")
+                source = sb.get_page_source()
+                logger.warning(
+                    f"Turnstile 状态: title={sb.get_title()!r}"
+                    f" widget={'challenges.cloudflare' in source}"
+                    f" turnstile={'cf-turnstile' in source}"
+                )
             except Exception as e:
                 logger.warning(f"读取 Turnstile 状态失败: {e}")
 
@@ -1196,6 +1227,8 @@ def main():
         logger.info(f"📍 当前出口 IP: {egress_ip}")
     except Exception as e:
         logger.warning(f"获取出口 IP 失败: {e}")
+    if egress_ip:
+        setup_timezone(egress_ip, proxy)
 
     display = setup_display()
     success_count = 0
