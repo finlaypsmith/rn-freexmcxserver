@@ -61,6 +61,12 @@ def mask_server_name(server_name: str, server_id: str) -> str:
 def mask_url(url: str) -> str:
     return re.sub(r'/server/\d+', '/server/***', url)
 
+def get_current_ip(proxy_server: Optional[str] = None) -> str:
+    proxies = {"http": proxy_server, "https": proxy_server} if proxy_server else None
+    response = requests.get("https://api.ip.sb/ip", proxies=proxies, timeout=15)
+    response.raise_for_status()
+    return response.text.strip()
+
 def setup_display():
     if is_linux() and not os.environ.get("DISPLAY"):
         try:
@@ -87,7 +93,7 @@ def safe_screenshot(sb, path: str, result: Optional[Dict] = None):
     except Exception as e:
         logger.warning(f"截图失败: {e}")
 
-def notify_telegram(account_index: int, email: str, server_results: List[Dict], overall_success: bool, overall_message: str = "", screenshot_file: str = None):
+def notify_telegram(account_index: int, email: str, server_results: List[Dict], overall_success: bool, overall_message: str = "", screenshot_file: str = None, egress_ip: str = ""):
     try:
         token = os.environ.get("TG_BOT_TOKEN")
         chat_id = os.environ.get("TG_CHAT_ID")
@@ -96,6 +102,8 @@ def notify_telegram(account_index: int, email: str, server_results: List[Dict], 
 
         status = "✅ 续订成功" if overall_success else "❌ 续订失败"
         text = f"{status}\n\n账号：{email}\n"
+        if egress_ip:
+            text += f"🌐 出口 IP：{egress_ip}\n"
         
         if server_results:
             for sr in server_results:
@@ -1140,10 +1148,22 @@ def main():
         logger.error("未找到账号配置")
         sys.exit(1)
 
-    proxy = os.environ.get("PROXY_SERVER") or os.environ.get("HY2_URL")
-    if proxy and not proxy.startswith("http"):
-        logger.warning("代理配置无效")
-        proxy = None
+    is_proxy = os.environ.get("IS_PROXY", "false").lower() == "true"
+    proxy = os.environ.get("PROXY_SERVER", "").strip() if is_proxy else None
+    if is_proxy and not proxy:
+        proxy = "http://127.0.0.1:1080"
+    if proxy:
+        scheme = proxy.split("://", 1)[0] if "://" in proxy else "http"
+        logger.info(f"🔗 使用代理（{scheme}）")
+    else:
+        logger.info("🍭 未使用代理，直连访问")
+
+    egress_ip = ""
+    try:
+        egress_ip = get_current_ip(proxy)
+        logger.info(f"📍 当前出口 IP: {egress_ip}")
+    except Exception as e:
+        logger.warning(f"获取出口 IP 失败: {e}")
 
     display = setup_display()
     success_count = 0
@@ -1164,7 +1184,8 @@ def main():
                 result.get("server_results", []),
                 result["success"],
                 result.get("message", ""),
-                last_screenshot
+                last_screenshot,
+                egress_ip
             )
 
             if i < len(accounts):

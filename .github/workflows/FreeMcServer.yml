@@ -25,7 +25,7 @@ jobs:
       - name: 安装依赖
         run: |
           sudo apt-get update && sudo apt-get install -y xvfb
-          pip install seleniumbase>=4.25.0 pyvirtualdisplay>=3.0 requests>=2.31.0
+          pip install seleniumbase>=4.25.0 pyvirtualdisplay>=3.0 requests>=2.31.0 PySocks>=1.7.1
 
       - name: ⚙ 设置代理 (自动选择 sing-box / Xray)
         continue-on-error: false
@@ -39,7 +39,7 @@ jobs:
           FREEMCSERVER: ${{ secrets.FREEMCSERVER }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          PROXY_SERVER: 'http://127.0.0.1:1080'
+          # IS_PROXY / PROXY_SERVER 由上一步 setup_p.sh 写入 $GITHUB_ENV，此处不要再覆盖
         run: |
           python main.py
 

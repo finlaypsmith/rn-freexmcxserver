@@ -15,7 +15,7 @@
 - 自动处理 Cloudflare Turnstile 验证和 AdBlocker 检测
 - 支持多账号批量处理
 - Telegram 机器人推送续订结果（含截图）
-- 支持 Hysteria2 代理
+- 支持 socks5 / HTTP 代理（sing-box / Xray 自动选择）
 - 每 3 小时自动执行，也可手动触发
 
 ## 配置
@@ -29,7 +29,16 @@
 | `FREEMCSERVER` | ✅ | FreeMcServer 账号信息 | 见下方格式 |
 | `TG_BOT_TOKEN` | ❌ | Telegram Bot Token | `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11` |
 | `TG_CHAT_ID` | ❌ | Telegram Chat ID | `123456789` |
-| `HY2_URL` | ✅ | Hysteria2 代理地址 | `hysteria2://password@server:port?sni=example.com` |
+| `NODE_LINK` | ✅ | 代理节点链接，由 `setup_p.sh` 自动选择 sing-box / Xray 并启动本地代理 | `vless://...`、`vmess://...`、`trojan://...`、`ss://...` |
+
+代理启动后，`setup_p.sh` 会通过 `$GITHUB_ENV` 写入以下变量（工作流中不要重复覆盖）：
+
+| 变量 | 说明 |
+|---|---|
+| `IS_PROXY` | 是否使用代理，为 `true` 时才走代理 |
+| `PROXY_SERVER` | 本地代理地址，如 `socks5://127.0.0.1:1080` |
+
+本地运行同理：不设置 `IS_PROXY` 则直连；设置 `IS_PROXY=true` 和 `PROXY_SERVER` 则走代理。代理支持 `http://`、`https://`、`socks5://`、`socks5h://`，使用 socks 时需安装 `PySocks`。
 
 ### FREEMCSERVER 格式
 
@@ -45,7 +54,7 @@ user@domain.com-----another_password
 ### GitHub Actions（推荐）
 
 1. Fork 本仓库
-2. 配置 `FREEMCSERVER` Secret
+2. 配置 `FREEMCSERVER` 与 `NODE_LINK` Secret
 3. 脚本会按 cron 计划自动运行（每 3 小时）
 4. 也可在 Actions 页面手动触发 `workflow_dispatch`
 
