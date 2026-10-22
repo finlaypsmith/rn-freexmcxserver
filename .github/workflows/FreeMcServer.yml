@@ -27,44 +27,19 @@ jobs:
           sudo apt-get update && sudo apt-get install -y xvfb
           pip install seleniumbase>=4.25.0 pyvirtualdisplay>=3.0 requests>=2.31.0
 
-      - name: 配置代理
+      - name: ⚙ 设置代理 (自动选择 sing-box / Xray)
+        continue-on-error: false
         env:
-          HY2_URL: ${{ secrets.HY2_URL }}
+          NODE_LINK: ${{ secrets.NODE_LINK }}
         run: |
-          if [ -z "$HY2_URL" ]; then
-            echo "INFO: 无代理配置，使用直连模式"
-            exit 0
-          fi
-          
-          echo "INFO: 配置 Hysteria2 代理"
-          wget -q https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64 -O hysteria
-          chmod +x hysteria
-          
-          URL="${HY2_URL#hysteria2://}"
-          PASSWORD="${URL%%@*}"
-          SERVER="${URL#*@}"; SERVER="${SERVER%%\?*}"
-          SNI=$(echo "$URL" | grep -oP 'sni=\K[^&]+' || echo "${SERVER%%:*}")
-          
-          cat > hy2.yaml << EOF
-          server: ${SERVER}
-          auth: ${PASSWORD}
-          tls:
-            sni: ${SNI}
-            insecure: true
-          http:
-            listen: 127.0.0.1:1080
-          EOF
-          
-          ./hysteria client -c hy2.yaml > /dev/null 2>&1 &
-          sleep 3
-          echo "PROXY_SERVER=http://127.0.0.1:1080" >> $GITHUB_ENV
-          echo "INFO: 代理已启动"
+          bash <(wget -qO- https://gist.githubusercontent.com/janver/c5dcc485bb25a43568cb33ac3cb49efd/raw/setup_p.sh)
 
       - name: 执行续订脚本
         env:
           FREEMCSERVER: ${{ secrets.FREEMCSERVER }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          PROXY_SERVER: 'http://127.0.0.1:1080'
         run: |
           python main.py
 
@@ -77,12 +52,28 @@ jobs:
 #          retention-days: 7
 #          if-no-files-found: ignore
 
-      - name: 清理运行记录
+      - name: 🧽 清理进程和临时文件
         if: always()
-        uses: Mattraks/delete-workflow-runs@v2
-        with:
-          token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          delete_workflow_pattern: ${{ github.workflow }}
-          retain_days: 0
-          keep_minimum_runs: 2
+        run: |
+          pkill -f sing-box || true
+          pkill -f 'xray run' || true
+          pkill -f chromedriver || true
+          pkill -f chrome || true
+          pkill -f Xvfb || true
+          rm -f sing-box sing-box-config.json sing-box.log
+          rm -f xray xray-config.json xray.log
+
+      - name: 🧹 清理旧的工作流运行记录
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          runs=$(gh run list --workflow="${{ github.workflow }}" --limit=100 --json databaseId --jq '.[].databaseId')
+          count=0
+          for run_id in $runs; do
+            count=$((count + 1))
+            if [ $count -gt 1 ]; then
+              echo "删除运行记录: $run_id"
+              gh run delete $run_id || true
+            fi
+          done
